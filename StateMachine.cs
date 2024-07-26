@@ -122,7 +122,7 @@ namespace IngameScript
                         if (timer.ShouldRestart)
                             timer.Reset();
                         // Test again in order to allow callback to reset timer
-                        if (timer.Expired)
+                        if (timer.Expired && timerNode.List != null)
                             _timers.Remove(timerNode);
                     }
                 }
