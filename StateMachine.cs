@@ -1,4 +1,4 @@
-﻿using Sandbox.Game.EntityComponents;
+using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI.Ingame;
 using Sandbox.ModAPI.Interfaces;
 using SpaceEngineers.Game.ModAPI.Ingame;
@@ -118,7 +118,8 @@ namespace IngameScript
 
             private void RunProbes(long elapsedTicks)
             {
-                foreach (var probe in _probes)
+                var probes = _probes.ToArray();
+                foreach (var probe in probes)
                 {
                     if (!probe.Active) continue; 
                     if (probe.Update(elapsedTicks))
