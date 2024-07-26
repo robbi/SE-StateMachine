@@ -1,4 +1,4 @@
-using Sandbox.Game.EntityComponents;
+﻿using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI.Ingame;
 using Sandbox.ModAPI.Interfaces;
 using SpaceEngineers.Game.ModAPI.Ingame;
@@ -59,6 +59,12 @@ namespace IngameScript
                 _timers.AddFirst(timer);
                 return timer;
             }
+            public EventLoopTimer SetInterval(EventLoopTimerCallback task, long delay)
+            {
+                var timer = new EventLoopTimer(task, 0, delay);
+                _timers.AddFirst(timer);
+                return timer;
+            }
             public bool CancelTimeout(EventLoopTimer timer) => _timers.Remove(timer);
             public void ResetTimeout(EventLoopTimer timer) => timer?.Reset();
 
@@ -111,10 +117,14 @@ namespace IngameScript
 
                     timer.Update(elapsedTicks);
                     if (timer.Expired)
+                    {
                         timer.Callback?.Invoke(this, timer);
-                    // Test number of remaining ticks again in order to allow callback to reset timer
-                    if (timer.Expired)
-                        _timers.Remove(timerNode);
+                        if (timer.ShouldRestart)
+                            timer.Reset();
+                        // Test again in order to allow callback to reset timer
+                        if (timer.Expired)
+                            _timers.Remove(timerNode);
+                    }
                 }
             }
 
@@ -170,17 +180,18 @@ namespace IngameScript
         {
             public EventLoopTimerCallback Callback;
             public bool Expired => _remainingTicks <= 0;
-            private readonly long _initialTicks;
+            public bool ShouldRestart => _restartTicks > 0;
+            private readonly long _restartTicks;
             private long _remainingTicks;
 
-            public EventLoopTimer(EventLoopTimerCallback callback, long delay)
+            public EventLoopTimer(EventLoopTimerCallback callback, long delay, long restart=0)
             {
                 Callback = callback;
-                _initialTicks = delay * TimeSpan.TicksPerMillisecond;
-                _remainingTicks = _initialTicks;
+                _restartTicks = restart * TimeSpan.TicksPerMillisecond;
+                _remainingTicks = delay * TimeSpan.TicksPerMillisecond;
             }
 
-            public void Reset() => _remainingTicks = _initialTicks;
+            public void Reset() => _remainingTicks = _restartTicks;
             public void Update(long elapsedTicks) => _remainingTicks -= elapsedTicks;
         }
 
