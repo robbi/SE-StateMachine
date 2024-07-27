@@ -39,7 +39,7 @@ namespace IngameScript
             private readonly Queue<IEnumerator<EventLoopTask>> _tasks = new Queue<IEnumerator<EventLoopTask>>();
             private IEnumerator<EventLoopTask> _runningTask = null;
 
-            public void Debug(string msg, int level=0) => _program.Debug(msg, level);
+            // public void Debug(string msg, int level=0) => _program.Debug(msg, level); //DEBUG
 
             public EventLoop(Program program, int maxTaskPerLoop)
             {
