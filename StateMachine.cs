@@ -26,9 +26,134 @@ namespace IngameScript
     partial class Program : MyGridProgram
     {
 
-        private EventLoop _defaultEventLoop;
-        public EventLoop InitializeEventLoop(Program program, int maxTaskPerLoop) => _defaultEventLoop = new EventLoop(program, maxTaskPerLoop);
-        public void RunEventLoop() => _defaultEventLoop.Run();
+        static EventLoop _defaultEventLoop;
+        public static EventLoop InitializeEventLoop(Program program, int maxTaskPerLoop) => _defaultEventLoop ?? (_defaultEventLoop = new EventLoop(program, maxTaskPerLoop));
+        public static void RunEventLoop() => _defaultEventLoop.Run();
+
+        class StateMachine<TState, TEvent>
+        {
+            struct EventTimeout
+            {
+                public long Delay;
+                public EventLoopTimerCallback Handler;
+            }
+
+            protected readonly EventLoop _eventLoop;
+            protected TState _currentState;
+            protected long _updateInterval;
+
+            private readonly Dictionary<TState, Dictionary<TEvent, EventLoopProbe>> _stateMachine = new Dictionary<TState, Dictionary<TEvent, EventLoopProbe>>();
+            private readonly Dictionary<TState, EventTimeout?> _timers = new Dictionary<TState, EventTimeout?>();
+            private readonly List<EventLoopProbe> _activeProbes = new List<EventLoopProbe>();
+            private EventLoopTimer _activeEventTimeout;
+
+            public TState CurrentState => _currentState;
+
+            public StateMachine(EventLoop eventLoop = null, long updateInterval = 100)
+            {
+                _eventLoop = eventLoop ?? _defaultEventLoop;
+                if (_eventLoop == null) throw new Exception("Event loop not initialized");
+                _updateInterval = updateInterval;
+            }
+
+            public TState SetState(TState state)
+            {
+                var oldState = _currentState;
+                if (!_stateMachine.ContainsKey(state)) throw new Exception($"Cannot set state to unknown {state}");
+                _currentState = state;
+                UpdateProbes();
+                return oldState;
+            }
+
+            public void AddState(TState state)
+            {
+                if (!_stateMachine.ContainsKey(state)) _stateMachine[state] = new Dictionary<TEvent, EventLoopProbe>();
+                if (!_timers.ContainsKey(state)) _timers[state] = null;
+            }
+
+            public void SetEventHandler(TState state, TEvent @event, Func<bool> condition, EventLoopTask task)
+            {
+                AddState(state);
+                var stateEvents = _stateMachine[state];
+                if (stateEvents.ContainsKey(@event))
+                {
+                    _eventLoop.RemoveProbe(stateEvents[@event]);
+                }
+                var eventHandler = CreateEventHandler(task);
+                var probe = _eventLoop.AddProbe(eventHandler, condition, _updateInterval);
+                stateEvents[@event] = probe;
+            }
+
+            public void SetEventTimeout(TState state, long delay, EventLoopTask task)
+            {
+                AddState(state);
+                var timeout = new EventTimeout()
+                {
+                    Delay = delay,
+                    Handler = CreateTimeoutHandler(task),
+                };
+                _timers[state] = timeout;
+            }
+
+            public EventLoopTask WaitFor(Func<bool> fnCondition, long timeout = 0) => _eventLoop.WaitFor(fnCondition, _updateInterval, timeout);
+
+            private EventLoopProbeCallback CreateEventHandler(EventLoopTask task)
+            {
+                return (el, probe) =>
+                {
+                    DisableProbes();
+                    DisableTimeout();
+                    _eventLoop.AddTask(task);
+                };
+            }
+
+            private EventLoopTimerCallback CreateTimeoutHandler(EventLoopTask task)
+            {
+                return (el, timer) =>
+                {
+                    DisableProbes();
+                    DisableTimeout();
+                    _eventLoop.AddTask(task);
+                };
+            }
+            protected void DisableProbes()
+            {
+                foreach (var probe in _activeProbes) probe.Disable();
+                _activeProbes.Clear();
+            }
+
+            protected void DisableTimeout()
+            {
+                if (_activeEventTimeout != null) _eventLoop.CancelTimer(_activeEventTimeout);
+                _activeEventTimeout = null;
+            }
+
+            protected void UpdateProbes(bool resetTimeout = true)
+            {
+                DisableProbes();
+                if (resetTimeout) DisableTimeout();
+
+                Dictionary<TEvent, EventLoopProbe> eventMap;
+                if (!_stateMachine.TryGetValue(_currentState, out eventMap)) return;
+                foreach (var eventHandler in eventMap.Values)
+                {
+                    if (eventHandler != null)
+                    {
+                        eventHandler.Enable();
+                        _activeProbes.Add(eventHandler);
+                    }
+                }
+                if (!_timers.ContainsKey(_currentState) || _timers[_currentState] == null)
+                {
+                    if (!resetTimeout) DisableTimeout();
+                }
+                else
+                {
+                    var timer = _timers[_currentState].Value;
+                    _activeEventTimeout = _eventLoop.SetTimeout(timer.Handler, timer.Delay);
+                }
+            }
+        }
 
         public class EventLoop
         {
@@ -65,8 +190,8 @@ namespace IngameScript
                 _timers.AddFirst(timer);
                 return timer;
             }
-            public bool CancelTimeout(EventLoopTimer timer) => _timers.Remove(timer);
-            public void ResetTimeout(EventLoopTimer timer) => timer?.Reset();
+            public bool CancelTimer(EventLoopTimer timer) => _timers.Remove(timer);
+            public void ResetTimer(EventLoopTimer timer) => timer?.Reset();
 
             public EventLoopProbe AddProbe(EventLoopProbeCallback cb, Func<bool> fnCondition, long minTimeBetweenUpdates) 
             {
@@ -86,7 +211,7 @@ namespace IngameScript
                 EventLoopTimer timer = null;
                 EventLoopProbe probe = null;
                 probe = AddProbe((el, p) => {
-                    el.CancelTimeout(timer);
+                    el.CancelTimer(timer);
                     el.RemoveProbe(p);
                     el.AddTask(currentTask);
                 }, fnCondition, minTimeBetweenUpdates);
