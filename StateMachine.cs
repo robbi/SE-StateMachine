@@ -59,7 +59,6 @@ namespace IngameScript
             public TState SetState(TState state)
             {
                 var oldState = _currentState;
-                if (!_stateMachine.ContainsKey(state)) throw new Exception($"Cannot set state to unknown {state}");
                 _currentState = state;
                 UpdateProbes();
                 return oldState;
@@ -102,8 +101,9 @@ namespace IngameScript
                 return (el, probe) =>
                 {
                     DisableProbes();
-                    DisableTimeout();
-                    _eventLoop.AddTask(task);
+                    _activeEventTimeout?.Reset();
+                    if (task != null) _eventLoop.AddTask(task);
+                    else UpdateProbes(false);
                 };
             }
 
@@ -112,8 +112,9 @@ namespace IngameScript
                 return (el, timer) =>
                 {
                     DisableProbes();
-                    DisableTimeout();
-                    _eventLoop.AddTask(task);
+                    _activeEventTimeout = null;
+                    if (task != null) _eventLoop.AddTask(task);
+                    else UpdateProbes();
                 };
             }
             protected void DisableProbes()
@@ -131,7 +132,6 @@ namespace IngameScript
             protected void UpdateProbes(bool resetTimeout = true)
             {
                 DisableProbes();
-                if (resetTimeout) DisableTimeout();
 
                 Dictionary<TEvent, EventLoopProbe> eventMap;
                 if (!_stateMachine.TryGetValue(_currentState, out eventMap)) return;
@@ -145,10 +145,11 @@ namespace IngameScript
                 }
                 if (!_timers.ContainsKey(_currentState) || _timers[_currentState] == null)
                 {
-                    if (!resetTimeout) DisableTimeout();
+                    DisableTimeout();
                 }
-                else
+                else if (resetTimeout)
                 {
+                    DisableTimeout();
                     var timer = _timers[_currentState].Value;
                     _activeEventTimeout = _eventLoop.SetTimeout(timer.Handler, timer.Delay);
                 }
@@ -163,8 +164,6 @@ namespace IngameScript
             private readonly HashSet<EventLoopProbe> _probes = new HashSet<EventLoopProbe>();
             private readonly Queue<IEnumerator<EventLoopTask>> _tasks = new Queue<IEnumerator<EventLoopTask>>();
             private IEnumerator<EventLoopTask> _runningTask = null;
-
-            // public void Debug(string msg, int level=0) => _program.Debug(msg, level); //DEBUG
 
             public EventLoop(Program program, int maxTaskPerLoop)
             {
@@ -190,7 +189,7 @@ namespace IngameScript
                 _timers.AddFirst(timer);
                 return timer;
             }
-            public bool CancelTimer(EventLoopTimer timer) => _timers.Remove(timer);
+            public bool CancelTimer(EventLoopTimer timer) => timer != null && _timers.Remove(timer);
             public void ResetTimer(EventLoopTimer timer) => timer?.Reset();
 
             public EventLoopProbe AddProbe(EventLoopProbeCallback cb, Func<bool> fnCondition, long minTimeBetweenUpdates) 
