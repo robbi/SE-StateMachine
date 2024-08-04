@@ -25,7 +25,6 @@ namespace IngameScript
 {
     partial class Program : MyGridProgram
     {
-        // StateMachine v1.0
         static EventLoop _defaultEventLoop;
         public static EventLoop InitializeEventLoop(Program program, int maxTaskPerLoop) => _defaultEventLoop ?? (_defaultEventLoop = new EventLoop(program, maxTaskPerLoop));
         public static void RunEventLoop() => _defaultEventLoop.Run();
