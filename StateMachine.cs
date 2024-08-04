@@ -25,7 +25,6 @@ namespace IngameScript
 {
     partial class Program : MyGridProgram
     {
-        // StateMachine v1.0
         static EventLoop _defaultEventLoop;
         public static EventLoop InitializeEventLoop(Program program, int maxTaskPerLoop) => _defaultEventLoop ?? (_defaultEventLoop = new EventLoop(program, maxTaskPerLoop));
         public static void RunEventLoop() => _defaultEventLoop.Run();
@@ -202,6 +201,13 @@ namespace IngameScript
             {
                 probe.Disable();
                 _probes.Remove(probe);
+            }
+
+            public EventLoopTask Sleep(long delay)
+            {
+                var currentTask = _runningTask;
+                SetTimeout((el, _) => el.AddTask(currentTask), delay);
+                return null;
             }
 
             public EventLoopTask WaitFor(Func<bool> fnCondition, long minTimeBetweenUpdates, long timeout = 0)
