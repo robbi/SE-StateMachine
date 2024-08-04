@@ -204,6 +204,13 @@ namespace IngameScript
                 _probes.Remove(probe);
             }
 
+            public EventLoopTask Sleep(long delay)
+            {
+                var currentTask = _runningTask;
+                SetTimeout((el, _) => el.AddTask(currentTask), delay);
+                return null;
+            }
+
             public EventLoopTask WaitFor(Func<bool> fnCondition, long minTimeBetweenUpdates, long timeout = 0)
             {
                 var currentTask = _runningTask;
