@@ -40,6 +40,12 @@ namespace IngameScript
 
         class StateMachine<TState, TEvent>
         {
+            /// <summary>
+            /// Define a state machine. Allows following ini parameters:
+            /// [StateMachine]
+            /// debug=0 ; Set to 1 to enable
+            /// UpdateInterval=100 ; Time between each check for change/event in ms
+            /// </summary>
             struct EventTimeout
             {
                 public long Delay;
@@ -179,6 +185,12 @@ namespace IngameScript
 
         public class EventLoop
         {
+            /// <summary>
+            /// Allow to launch multiple task and run them later in FIFO.
+            /// Accepts following ini parameters:
+            /// [EventLoop]
+            /// maxTaskPerLoop=5 ; Maximum tasks executed each programmable block loop (every 10th game tick)
+            /// </summary>
             public readonly Program Pgm;
             private readonly int _maxTaskPerLoop;
             private readonly LinkedList<EventLoopTimer> _timers = new LinkedList<EventLoopTimer>();
