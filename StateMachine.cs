@@ -25,38 +25,58 @@ namespace IngameScript
 {
     partial class Program : MyGridProgram
     {
-        static EventLoop _defaultEventLoop;
-        public static EventLoop InitializeEventLoop(Program program, int maxTaskPerLoop) => _defaultEventLoop ?? (_defaultEventLoop = new EventLoop(program, maxTaskPerLoop));
-        public static void RunEventLoop() => _defaultEventLoop.Run();
+        const int MAX_LOG_SIZE = 1000;
+        Queue<string> _debugLogs = new Queue<string>(MAX_LOG_SIZE);
+        void Debug(string msg)
+        {
+            if (_debugLogs.Count >= MAX_LOG_SIZE) _debugLogs.Dequeue();
+            _debugLogs.Enqueue(msg);
+        }
+        string DebugLogs => string.Join("\n", _debugLogs);
+
+        EventLoop _defaultEventLoop;
+        public EventLoop InitializeEventLoop(Program program, MyIni ini = null) => _defaultEventLoop ?? (_defaultEventLoop = new EventLoop(program, ini));
+        public void RunEventLoop() => _defaultEventLoop.Run();
 
         class StateMachine<TState, TEvent>
         {
+            /// <summary>
+            /// Define a state machine. Allows following ini parameters:
+            /// [StateMachine]
+            /// debug=0 ; Set to 1 to enable
+            /// UpdateInterval=100 ; Time between each check for change/event in ms
+            /// </summary>
             struct EventTimeout
             {
                 public long Delay;
                 public EventLoopTimerCallback Handler;
             }
 
-            protected readonly EventLoop _eventLoop;
             protected TState _currentState;
             protected long _updateInterval;
+            protected int _debug;
 
             private readonly Dictionary<TState, Dictionary<TEvent, EventLoopProbe>> _stateMachine = new Dictionary<TState, Dictionary<TEvent, EventLoopProbe>>();
             private readonly Dictionary<TState, EventTimeout?> _timers = new Dictionary<TState, EventTimeout?>();
             private readonly List<EventLoopProbe> _activeProbes = new List<EventLoopProbe>();
             private EventLoopTimer _activeEventTimeout;
 
+            public readonly Program Pgm;
+            public readonly EventLoop EvtLoop;
             public TState CurrentState => _currentState;
 
-            public StateMachine(EventLoop eventLoop = null, long updateInterval = 100)
+            public StateMachine(EventLoop eventLoop, MyIni ini = null)
             {
-                _eventLoop = eventLoop ?? _defaultEventLoop;
-                if (_eventLoop == null) throw new Exception("Event loop not initialized");
-                _updateInterval = updateInterval;
+                EvtLoop = eventLoop;
+                if (EvtLoop == null) throw new Exception("Event loop not initialized");
+                Pgm = EvtLoop.Pgm;
+                _updateInterval = ini?.Get("StateMachine", "UpdateInterval").ToInt64(100) ?? 100;
+                _debug = ini?.Get("StateMachine", "debug").ToInt32() ?? 0;
             }
 
             public TState SetState(TState state)
             {
+                if (_debug > 0) Pgm.Debug($"StateMachine#{GetHashCode():X}: SetState {state}");
                 var oldState = _currentState;
                 _currentState = state;
                 UpdateProbes();
@@ -75,10 +95,10 @@ namespace IngameScript
                 var stateEvents = _stateMachine[state];
                 if (stateEvents.ContainsKey(@event))
                 {
-                    _eventLoop.RemoveProbe(stateEvents[@event]);
+                    EvtLoop.RemoveProbe(stateEvents[@event]);
                 }
                 var eventHandler = CreateEventHandler(task);
-                var probe = _eventLoop.AddProbe(eventHandler, condition, _updateInterval);
+                var probe = EvtLoop.AddProbe(eventHandler, condition, _updateInterval);
                 stateEvents[@event] = probe;
             }
 
@@ -93,15 +113,16 @@ namespace IngameScript
                 _timers[state] = timeout;
             }
 
-            public EventLoopTask WaitFor(Func<bool> fnCondition, long timeout = 0) => _eventLoop.WaitFor(fnCondition, _updateInterval, timeout);
+            public EventLoopTask WaitFor(Func<bool> fnCondition, long timeout = 0) => EvtLoop.WaitFor(fnCondition, _updateInterval, timeout);
 
             private EventLoopProbeCallback CreateEventHandler(EventLoopTask task)
             {
                 return (el, probe) =>
                 {
+                    if (_debug > 0) Pgm.Debug($"StateMachine#{GetHashCode():X}.OnEvent({probe.Condition?.Method.Name}): {task?.Method.Name}");
                     DisableProbes();
                     _activeEventTimeout?.Reset();
-                    if (task != null) _eventLoop.AddTask(task);
+                    if (task != null) EvtLoop.AddTask(task);
                     else UpdateProbes(false);
                 };
             }
@@ -110,9 +131,10 @@ namespace IngameScript
             {
                 return (el, timer) =>
                 {
+                    if (_debug > 0) Pgm.Debug($"StateMachine#{GetHashCode():X}.OnTimeout: {task?.Method.Name}");
                     DisableProbes();
                     _activeEventTimeout = null;
-                    if (task != null) _eventLoop.AddTask(task);
+                    if (task != null) EvtLoop.AddTask(task);
                     else UpdateProbes();
                 };
             }
@@ -124,7 +146,7 @@ namespace IngameScript
 
             protected void DisableTimeout()
             {
-                if (_activeEventTimeout != null) _eventLoop.CancelTimer(_activeEventTimeout);
+                if (_activeEventTimeout != null) EvtLoop.CancelTimer(_activeEventTimeout);
                 _activeEventTimeout = null;
             }
 
@@ -133,7 +155,12 @@ namespace IngameScript
                 DisableProbes();
 
                 Dictionary<TEvent, EventLoopProbe> eventMap;
-                if (!_stateMachine.TryGetValue(_currentState, out eventMap)) return;
+                if (!_stateMachine.TryGetValue(_currentState, out eventMap))
+                {
+                    if (resetTimeout) DisableTimeout();
+                    if (_debug > 0) Pgm.Debug($"StateMachine#{GetHashCode():X}: All probes disabled");
+                    return;
+                }
                 foreach (var eventHandler in eventMap.Values)
                 {
                     if (eventHandler != null)
@@ -150,26 +177,32 @@ namespace IngameScript
                 {
                     DisableTimeout();
                     var timer = _timers[_currentState].Value;
-                    _activeEventTimeout = _eventLoop.SetTimeout(timer.Handler, timer.Delay);
+                    _activeEventTimeout = EvtLoop.SetTimeout(timer.Handler, timer.Delay);
                 }
+                if (_debug > 0) Pgm.Debug($"StateMachine#{GetHashCode():X}: {_activeProbes.Count} probe active, timeout {_activeEventTimeout?.RemainingTime ?? -1}");
             }
         }
 
         public class EventLoop
         {
-            private readonly Program _program;
+            /// <summary>
+            /// Allow to launch multiple task and run them later in FIFO.
+            /// Accepts following ini parameters:
+            /// [EventLoop]
+            /// maxTaskPerLoop=5 ; Maximum tasks executed each programmable block loop (every 10th game tick)
+            /// </summary>
+            public readonly Program Pgm;
             private readonly int _maxTaskPerLoop;
             private readonly LinkedList<EventLoopTimer> _timers = new LinkedList<EventLoopTimer>();
             private readonly HashSet<EventLoopProbe> _probes = new HashSet<EventLoopProbe>();
             private readonly Queue<IEnumerator<EventLoopTask>> _tasks = new Queue<IEnumerator<EventLoopTask>>();
             private IEnumerator<EventLoopTask> _runningTask = null;
 
-            public EventLoop(Program program, int maxTaskPerLoop)
+            public EventLoop(Program program, MyIni ini = null)
             {
-                _program = program;
-                _maxTaskPerLoop = maxTaskPerLoop;
-
-                _program.Runtime.UpdateFrequency |= UpdateFrequency.Update10;
+                Pgm = program;
+                _maxTaskPerLoop = ini?.Get("EventLoop", "maxTaskPerLoop").ToInt32(5) ?? 5;
+                Pgm.Runtime.UpdateFrequency |= UpdateFrequency.Update10;
             }
 
             public void AddTask(EventLoopTask task) => _tasks.Enqueue(task.Invoke(this).GetEnumerator());
@@ -230,7 +263,7 @@ namespace IngameScript
 
             public void Run()
             {
-                var elapsedTicks = _program.Runtime.TimeSinceLastRun.Ticks;
+                var elapsedTicks = Pgm.Runtime.TimeSinceLastRun.Ticks;
                 RunTimers(elapsedTicks);
                 RunProbes(elapsedTicks);
                 RunTasks();
@@ -323,6 +356,7 @@ namespace IngameScript
 
             public void Reset() => _remainingTicks = _restartTicks;
             public void Update(long elapsedTicks) => _remainingTicks -= elapsedTicks;
+            public long RemainingTime => _remainingTicks / TimeSpan.TicksPerMillisecond;
         }
 
         public class EventLoopProbe
@@ -331,14 +365,14 @@ namespace IngameScript
             private long _ticksLeftToUpdate = 0;
             private bool _active = false;
             private readonly long _ticksBetweenUpdates = 0;
-            private readonly Func<bool> _checkCondition;
+            public readonly Func<bool> Condition;
 
             public bool Active => _active;
 
             public EventLoopProbe(EventLoopProbeCallback cb, Func<bool> fnCheckCondition, long minTimeBetweenUpdates)
             {
                 Callback = cb;
-                _checkCondition = fnCheckCondition;
+                Condition = fnCheckCondition;
                 _ticksBetweenUpdates = minTimeBetweenUpdates * TimeSpan.TicksPerMillisecond;
             }
 
@@ -347,7 +381,7 @@ namespace IngameScript
                 _ticksLeftToUpdate -= elapsedTicks;
                 if (_ticksLeftToUpdate > 0) return false;
                 _ticksLeftToUpdate = _ticksBetweenUpdates;
-                return _checkCondition();
+                return Condition();
             }
 
             public void Enable() => _active = true;
