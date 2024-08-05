@@ -1,4 +1,4 @@
-using Sandbox.Game.EntityComponents;
+﻿using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI.Ingame;
 using Sandbox.ModAPI.Interfaces;
 using SpaceEngineers.Game.ModAPI.Ingame;
@@ -151,6 +151,7 @@ namespace IngameScript
                 Dictionary<TEvent, EventLoopProbe> eventMap;
                 if (!_stateMachine.TryGetValue(_currentState, out eventMap))
                 {
+                    if (resetTimeout) DisableTimeout();
                     if (_debug > 0) Pgm.Debug($"StateMachine#{GetHashCode():X}: All probes disabled");
                     return;
                 }
