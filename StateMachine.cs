@@ -1,4 +1,4 @@
-﻿using Sandbox.Game.EntityComponents;
+using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI.Ingame;
 using Sandbox.ModAPI.Interfaces;
 using SpaceEngineers.Game.ModAPI.Ingame;
@@ -26,7 +26,7 @@ namespace IngameScript
     partial class Program : MyGridProgram
     {
         static EventLoop _defaultEventLoop;
-        public static EventLoop InitializeEventLoop(Program program, int maxTaskPerLoop) => _defaultEventLoop ?? (_defaultEventLoop = new EventLoop(program, maxTaskPerLoop));
+        public static EventLoop InitializeEventLoop(Program program, MyIni ini = null) => _defaultEventLoop ?? (_defaultEventLoop = new EventLoop(program, ini));
         public static void RunEventLoop() => _defaultEventLoop.Run();
 
         class StateMachine<TState, TEvent>
@@ -48,11 +48,11 @@ namespace IngameScript
 
             public TState CurrentState => _currentState;
 
-            public StateMachine(EventLoop eventLoop = null, long updateInterval = 100)
+            public StateMachine(EventLoop eventLoop = null, MyIni ini = null)
             {
                 _eventLoop = eventLoop ?? _defaultEventLoop;
                 if (_eventLoop == null) throw new Exception("Event loop not initialized");
-                _updateInterval = updateInterval;
+                _updateInterval = ini?.Get("StateMachine", "UpdateInterval").ToInt64(100) ?? 100;
             }
 
             public TState SetState(TState state)
@@ -164,12 +164,9 @@ namespace IngameScript
             private readonly Queue<IEnumerator<EventLoopTask>> _tasks = new Queue<IEnumerator<EventLoopTask>>();
             private IEnumerator<EventLoopTask> _runningTask = null;
 
-            public EventLoop(Program program, int maxTaskPerLoop)
+            public EventLoop(Program program, MyIni ini = null)
             {
-                _program = program;
-                _maxTaskPerLoop = maxTaskPerLoop;
-
-                _program.Runtime.UpdateFrequency |= UpdateFrequency.Update10;
+                _maxTaskPerLoop = ini?.Get("EventLoop", "maxTaskPerLoop").ToInt32(5) ?? 5;
             }
 
             public void AddTask(EventLoopTask task) => _tasks.Enqueue(task.Invoke(this).GetEnumerator());
