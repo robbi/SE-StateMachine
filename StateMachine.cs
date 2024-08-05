@@ -25,9 +25,9 @@ namespace IngameScript
 {
     partial class Program : MyGridProgram
     {
-        static EventLoop _defaultEventLoop;
-        public static EventLoop InitializeEventLoop(Program program, MyIni ini = null) => _defaultEventLoop ?? (_defaultEventLoop = new EventLoop(program, ini));
-        public static void RunEventLoop() => _defaultEventLoop.Run();
+        EventLoop _defaultEventLoop;
+        public EventLoop InitializeEventLoop(Program program, MyIni ini = null) => _defaultEventLoop ?? (_defaultEventLoop = new EventLoop(program, ini));
+        public void RunEventLoop() => _defaultEventLoop.Run();
 
         class StateMachine<TState, TEvent>
         {
@@ -37,7 +37,6 @@ namespace IngameScript
                 public EventLoopTimerCallback Handler;
             }
 
-            protected readonly EventLoop _eventLoop;
             protected TState _currentState;
             protected long _updateInterval;
 
@@ -47,13 +46,14 @@ namespace IngameScript
             private EventLoopTimer _activeEventTimeout;
 
             public readonly Program Pgm;
+            public readonly EventLoop EvtLoop;
             public TState CurrentState => _currentState;
 
             public StateMachine(EventLoop eventLoop = null, MyIni ini = null)
             {
-                _eventLoop = eventLoop ?? _defaultEventLoop;
-                if (_eventLoop == null) throw new Exception("Event loop not initialized");
-                Pgm = _eventLoop.Pgm;
+                EvtLoop = eventLoop ?? Pgm._defaultEventLoop;
+                if (EvtLoop == null) throw new Exception("Event loop not initialized");
+                Pgm = EvtLoop.Pgm;
                 _updateInterval = ini?.Get("StateMachine", "UpdateInterval").ToInt64(100) ?? 100;
             }
 
@@ -77,10 +77,10 @@ namespace IngameScript
                 var stateEvents = _stateMachine[state];
                 if (stateEvents.ContainsKey(@event))
                 {
-                    _eventLoop.RemoveProbe(stateEvents[@event]);
+                    EvtLoop.RemoveProbe(stateEvents[@event]);
                 }
                 var eventHandler = CreateEventHandler(task);
-                var probe = _eventLoop.AddProbe(eventHandler, condition, _updateInterval);
+                var probe = EvtLoop.AddProbe(eventHandler, condition, _updateInterval);
                 stateEvents[@event] = probe;
             }
 
@@ -95,7 +95,7 @@ namespace IngameScript
                 _timers[state] = timeout;
             }
 
-            public EventLoopTask WaitFor(Func<bool> fnCondition, long timeout = 0) => _eventLoop.WaitFor(fnCondition, _updateInterval, timeout);
+            public EventLoopTask WaitFor(Func<bool> fnCondition, long timeout = 0) => EvtLoop.WaitFor(fnCondition, _updateInterval, timeout);
 
             private EventLoopProbeCallback CreateEventHandler(EventLoopTask task)
             {
@@ -103,7 +103,7 @@ namespace IngameScript
                 {
                     DisableProbes();
                     _activeEventTimeout?.Reset();
-                    if (task != null) _eventLoop.AddTask(task);
+                    if (task != null) EvtLoop.AddTask(task);
                     else UpdateProbes(false);
                 };
             }
@@ -114,7 +114,7 @@ namespace IngameScript
                 {
                     DisableProbes();
                     _activeEventTimeout = null;
-                    if (task != null) _eventLoop.AddTask(task);
+                    if (task != null) EvtLoop.AddTask(task);
                     else UpdateProbes();
                 };
             }
@@ -126,7 +126,7 @@ namespace IngameScript
 
             protected void DisableTimeout()
             {
-                if (_activeEventTimeout != null) _eventLoop.CancelTimer(_activeEventTimeout);
+                if (_activeEventTimeout != null) EvtLoop.CancelTimer(_activeEventTimeout);
                 _activeEventTimeout = null;
             }
 
@@ -152,7 +152,7 @@ namespace IngameScript
                 {
                     DisableTimeout();
                     var timer = _timers[_currentState].Value;
-                    _activeEventTimeout = _eventLoop.SetTimeout(timer.Handler, timer.Delay);
+                    _activeEventTimeout = EvtLoop.SetTimeout(timer.Handler, timer.Delay);
                 }
             }
         }
