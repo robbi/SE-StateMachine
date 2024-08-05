@@ -25,6 +25,15 @@ namespace IngameScript
 {
     partial class Program : MyGridProgram
     {
+        const int MAX_LOG_SIZE = 1000;
+        Queue<string> _debugLogs = new Queue<string>(MAX_LOG_SIZE);
+        void Debug(string msg)
+        {
+            if (_debugLogs.Count >= MAX_LOG_SIZE) _debugLogs.Dequeue();
+            _debugLogs.Enqueue(msg);
+        }
+        string DebugLogs => string.Join("\n", _debugLogs);
+
         EventLoop _defaultEventLoop;
         public EventLoop InitializeEventLoop(Program program, MyIni ini = null) => _defaultEventLoop ?? (_defaultEventLoop = new EventLoop(program, ini));
         public void RunEventLoop() => _defaultEventLoop.Run();
@@ -39,6 +48,7 @@ namespace IngameScript
 
             protected TState _currentState;
             protected long _updateInterval;
+            protected int _debug;
 
             private readonly Dictionary<TState, Dictionary<TEvent, EventLoopProbe>> _stateMachine = new Dictionary<TState, Dictionary<TEvent, EventLoopProbe>>();
             private readonly Dictionary<TState, EventTimeout?> _timers = new Dictionary<TState, EventTimeout?>();
@@ -55,10 +65,12 @@ namespace IngameScript
                 if (EvtLoop == null) throw new Exception("Event loop not initialized");
                 Pgm = EvtLoop.Pgm;
                 _updateInterval = ini?.Get("StateMachine", "UpdateInterval").ToInt64(100) ?? 100;
+                _debug = ini?.Get("StateMachine", "debug").ToInt32() ?? 0;
             }
 
             public TState SetState(TState state)
             {
+                if (_debug > 0) Pgm.Debug($"StateMachine#{GetHashCode():X}: SetState {state}");
                 var oldState = _currentState;
                 _currentState = state;
                 UpdateProbes();
@@ -101,6 +113,7 @@ namespace IngameScript
             {
                 return (el, probe) =>
                 {
+                    if (_debug > 0) Pgm.Debug($"StateMachine#{GetHashCode():X}.OnEvent({probe.Condition?.Method.Name}): {task?.Method.Name}");
                     DisableProbes();
                     _activeEventTimeout?.Reset();
                     if (task != null) EvtLoop.AddTask(task);
@@ -112,6 +125,7 @@ namespace IngameScript
             {
                 return (el, timer) =>
                 {
+                    if (_debug > 0) Pgm.Debug($"StateMachine#{GetHashCode():X}.OnTimeout: {task?.Method.Name}");
                     DisableProbes();
                     _activeEventTimeout = null;
                     if (task != null) EvtLoop.AddTask(task);
@@ -135,7 +149,11 @@ namespace IngameScript
                 DisableProbes();
 
                 Dictionary<TEvent, EventLoopProbe> eventMap;
-                if (!_stateMachine.TryGetValue(_currentState, out eventMap)) return;
+                if (!_stateMachine.TryGetValue(_currentState, out eventMap))
+                {
+                    if (_debug > 0) Pgm.Debug($"StateMachine#{GetHashCode():X}: All probes disabled");
+                    return;
+                }
                 foreach (var eventHandler in eventMap.Values)
                 {
                     if (eventHandler != null)
@@ -154,6 +172,7 @@ namespace IngameScript
                     var timer = _timers[_currentState].Value;
                     _activeEventTimeout = EvtLoop.SetTimeout(timer.Handler, timer.Delay);
                 }
+                if (_debug > 0) Pgm.Debug($"StateMachine#{GetHashCode():X}: {_activeProbes.Count} probe active, timeout {_activeEventTimeout?.RemainingTime ?? -1}");
             }
         }
 
