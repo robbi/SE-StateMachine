@@ -59,9 +59,9 @@ namespace IngameScript
             public readonly EventLoop EvtLoop;
             public TState CurrentState => _currentState;
 
-            public StateMachine(EventLoop eventLoop = null, MyIni ini = null)
+            public StateMachine(EventLoop eventLoop, MyIni ini = null)
             {
-                EvtLoop = eventLoop ?? Pgm._defaultEventLoop;
+                EvtLoop = eventLoop;
                 if (EvtLoop == null) throw new Exception("Event loop not initialized");
                 Pgm = EvtLoop.Pgm;
                 _updateInterval = ini?.Get("StateMachine", "UpdateInterval").ToInt64(100) ?? 100;
