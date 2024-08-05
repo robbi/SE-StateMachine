@@ -46,12 +46,14 @@ namespace IngameScript
             private readonly List<EventLoopProbe> _activeProbes = new List<EventLoopProbe>();
             private EventLoopTimer _activeEventTimeout;
 
+            public readonly Program Pgm;
             public TState CurrentState => _currentState;
 
             public StateMachine(EventLoop eventLoop = null, MyIni ini = null)
             {
                 _eventLoop = eventLoop ?? _defaultEventLoop;
                 if (_eventLoop == null) throw new Exception("Event loop not initialized");
+                Pgm = _eventLoop.Pgm;
                 _updateInterval = ini?.Get("StateMachine", "UpdateInterval").ToInt64(100) ?? 100;
             }
 
@@ -157,7 +159,7 @@ namespace IngameScript
 
         public class EventLoop
         {
-            private readonly Program _program;
+            public readonly Program Pgm;
             private readonly int _maxTaskPerLoop;
             private readonly LinkedList<EventLoopTimer> _timers = new LinkedList<EventLoopTimer>();
             private readonly HashSet<EventLoopProbe> _probes = new HashSet<EventLoopProbe>();
@@ -166,7 +168,9 @@ namespace IngameScript
 
             public EventLoop(Program program, MyIni ini = null)
             {
+                Pgm = program;
                 _maxTaskPerLoop = ini?.Get("EventLoop", "maxTaskPerLoop").ToInt32(5) ?? 5;
+                Pgm.Runtime.UpdateFrequency |= UpdateFrequency.Update10;
             }
 
             public void AddTask(EventLoopTask task) => _tasks.Enqueue(task.Invoke(this).GetEnumerator());
@@ -227,7 +231,7 @@ namespace IngameScript
 
             public void Run()
             {
-                var elapsedTicks = _program.Runtime.TimeSinceLastRun.Ticks;
+                var elapsedTicks = Pgm.Runtime.TimeSinceLastRun.Ticks;
                 RunTimers(elapsedTicks);
                 RunProbes(elapsedTicks);
                 RunTasks();
@@ -320,6 +324,7 @@ namespace IngameScript
 
             public void Reset() => _remainingTicks = _restartTicks;
             public void Update(long elapsedTicks) => _remainingTicks -= elapsedTicks;
+            public long RemainingTime => _remainingTicks / TimeSpan.TicksPerMillisecond;
         }
 
         public class EventLoopProbe
@@ -328,14 +333,14 @@ namespace IngameScript
             private long _ticksLeftToUpdate = 0;
             private bool _active = false;
             private readonly long _ticksBetweenUpdates = 0;
-            private readonly Func<bool> _checkCondition;
+            public readonly Func<bool> Condition;
 
             public bool Active => _active;
 
             public EventLoopProbe(EventLoopProbeCallback cb, Func<bool> fnCheckCondition, long minTimeBetweenUpdates)
             {
                 Callback = cb;
-                _checkCondition = fnCheckCondition;
+                Condition = fnCheckCondition;
                 _ticksBetweenUpdates = minTimeBetweenUpdates * TimeSpan.TicksPerMillisecond;
             }
 
@@ -344,7 +349,7 @@ namespace IngameScript
                 _ticksLeftToUpdate -= elapsedTicks;
                 if (_ticksLeftToUpdate > 0) return false;
                 _ticksLeftToUpdate = _ticksBetweenUpdates;
-                return _checkCondition();
+                return Condition();
             }
 
             public void Enable() => _active = true;
